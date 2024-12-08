@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Test</title>
+    <style>
+        /* Temel stil ayarları */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: #fafafa;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        /* Sohbet ekranı için stil */
+        #chatContainer {
+            display: none;
+            width: 100%;
+            max-width: 600px;
+            background-color: #333;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        /* Mesaj kutusu */
+        #messageBox {
+            height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: #444;
+            border-radius: 8px;
+        }
+
+        .message {
+            padding: 8px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            max-width: 60%;
+            clear: both;
+            background-color: #3cb857;
+            color: white;
+        }
+
+        .myMessage {
+            background-color: #3cb857;
+            float: right;
+        }
+
+        .otherMessage {
+            background-color: #707070;
+            float: left;
+        }
+
+        .systemMessage {
+            text-align: center;
+            font-style: italic;
+            color: #ccc;
+            margin-top: 20px;
+        }
+
+        /* Kullanıcı adı girişi */
+        #usernameDiv {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #444;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        #usernameInput {
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            background-color: #333;
+            color: #fafafa;
+            width: 80%;
+        }
+
+        button {
+            background-color: #3cb857;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background-color: #288d42;
+        }
+
+        #messageInput {
+            width: 80%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            background-color: #333;
+            color: #fafafa;
+        }
+
+        .sendButton {
+            padding: 10px 10px;
+            background-color: #3cb857;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            display: inline-block;
+        }
+
+        .sendButton:hover {
+            background-color: #288d42;
+        }
+
+        #chatHeader {
+            background-color: #333;
+            color: rgb(29, 120, 224);
+            padding: 10px;
+            text-align: center;
+            border-radius: 8px;
+        }
+
+        /* Katılımcılar listesi */
+        #userList {
+            margin-top: 10px;
+            text-align: center;
+            color: #bbb;
+        }
+    </style>
+</head>
+
+<body>
+<!-- Kullanıcı adı girişi -->
+<div id="usernameDiv">
+    <h2>👋😎</h2>
+    <input type="text" id="usernameInput" placeholder="Adınızı giriniz...">
+    <button onclick="connect()">Sohbete Bağlan</button>
+</div>
+
+<!-- Sohbet ekranı -->
+<div id="chatContainer">
+    <div id="chatHeader">
+        <h3>Genel Sohbet</h3>
+    </div>
+
+    <!-- Mesaj kutusu -->
+    <div id="messageBox"></div>
+
+    <!-- Mesaj yazma alanı -->
+    <div>
+        <input type="text" id="messageInput" placeholder="Mesajınızı yazın..." />
+        <button class="sendButton" onclick="sendMessage()">&#8594;</button>
+    </div>
+</div>
+
+<!-- WebSocket ve STOMP -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.0/sockjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+
+<script>
+    let stompClient = null;
+    const roomId = 0;  // Genel sohbet odası
+    let currentUser = null;
+    let usersInRoom = []; // Odada bulunan kullanıcılar
+
+    function connect() {
+        const username = document.getElementById("usernameInput").value.trim();
+        if (!username) {
+            alert("Lütfen bir kullanıcı adı girin.");
+            return;
+        }
+
+        currentUser = {
+            id: Date.now(),  // Benzersiz id
+            name: username
+        };
+
+        // WebSocket bağlantısı
+        const socket = new SockJS('https://localhost:8443/ws');
+        stompClient = Stomp.over(socket);
+
+        stompClient.connect({}, function () {
+            console.log("WebSocket bağlantısı kuruldu.");
+
+            // Odaya abone ol
+            stompClient.subscribe(`/room/${roomId}`, function (messageOutput) {
+                showMessage(JSON.parse(messageOutput.body));
+            });
+
+            // Katılımcıları ve geçmiş mesajları almak için ayrı bir abonelik
+            stompClient.subscribe(`/room/${roomId}/users`, function (usersOutput) {
+                const users = JSON.parse(usersOutput.body);
+                updateUserList(users);
+            });
+
+            // Geçmiş mesajları al
+            stompClient.send("/app/chat.getMessages", {}, JSON.stringify({ roomId }));
+
+            // Kullanıcı katılımını bildir
+            stompClient.send("/app/chat.addUser", {}, JSON.stringify({
+                sender: currentUser,
+                type: "JOIN",
+                roomId
+            }));
+
+
+
+            // Bağlantı sonrası giriş alanını gizle ve sohbet ekranını göster
+            document.getElementById("usernameDiv").style.display = "none";
+            document.getElementById("chatContainer").style.display = "block";
+        }, function (error) {
+            console.error("Bağlantı hatası:", error);
+        });
+    }
+
+    function sendMessage() {
+        const messageContent = document.getElementById("messageInput").value.trim();
+        if (messageContent && stompClient) {
+            const chatMessage = {
+                sender: currentUser,
+                msg: messageContent,
+                type: 'CHAT',
+                roomId,
+                sentDate: new Date().toISOString()
+            };
+            stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(chatMessage));
+            document.getElementById("messageInput").value = "";
+        }
+    }
+
+    // Enter tuşuna basınca mesaj gönder
+    document.getElementById("messageInput").addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+            event.preventDefault(); // Sayfanın yenilenmesini engelle
+            sendMessage();
+        }
+    });
+
+    function showMessage(message) {
+        const messageBox = document.getElementById("messageBox");
+
+        const messageElement = document.createElement("div");
+        messageElement.classList.add("message");
+
+        // Mesajı kendinize göre hizalayın
+        if (message.sender.id === currentUser.id) {
+            messageElement.classList.add("myMessage");
+        } else {
+            messageElement.classList.add("otherMessage");
+        }
+
+        // Eğer mesaj bir JOIN türündeyse, katılım mesajı olarak göster
+        if (message.type === "JOIN") {
+            showSystemMessage(`${message.sender.name} sohbete katıldı`);
+        } else {
+            // Diğer mesajlar normal şekilde gösteriliyor
+            messageElement.innerHTML = `<strong>${message.sender.name}:</strong> ${message.msg}`;
+            messageBox.appendChild(messageElement);
+        }
+
+        // Mesaj kutusunun en altına kaydırma
+        messageBox.scrollTop = messageBox.scrollHeight;
+    }
+
+
+    function updateUserList(users) {
+        const userList = document.getElementById("userList");
+        usersInRoom = users;
+        userList.innerHTML = users.join(", ");
+    }
+
+    function showSystemMessage(msg) {
+        const messageBox = document.getElementById("messageBox");
+        const systemMessage = document.createElement("div");
+        systemMessage.classList.add("systemMessage");
+        systemMessage.innerHTML = msg;
+        messageBox.appendChild(systemMessage);
+    }
+</script>
+</body>
+
+</html>
